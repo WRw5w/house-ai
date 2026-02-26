@@ -29,12 +29,17 @@ def ensure_data_exists():
     If not, generates a synthetic dataset mimicking the House Prices competition structure.
     This ensures the script is 'Execution Ready' in any environment.
     """
-    if os.path.exists('train.csv') and os.path.exists('test.csv'):
-        print("Data files found.")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    train_path = os.path.join(base_dir, 'train.csv')
+    test_path = os.path.join(base_dir, 'test.csv')
+
+    if os.path.exists(train_path) and os.path.exists(test_path):
+        print(f"Data files found at {base_dir}")
         return
 
-    print("Data files not found. Generating synthetic data for demonstration...")
-
+    print(f"Data files not found in {base_dir}. Generating synthetic data...")
+    
+    # ... (生成数据的代码逻辑保持不变，但保存路径需要更新)
     np.random.seed(42)
     n_train = 1460
     n_test = 1459
@@ -42,49 +47,30 @@ def ensure_data_exists():
     def generate_df(n, is_train=True):
         df = pd.DataFrame()
         df['Id'] = range(1, n + 1) if is_train else range(1461, 1461 + n)
-
-        # Crucial Features mentioned in requirements
         df['GrLivArea'] = np.random.normal(1500, 500, n)
-        # Add some outliers
-        if is_train:
-            df.loc[0:1, 'GrLivArea'] = 4500
-
+        if is_train: df.loc[0:1, 'GrLivArea'] = 4500
         df['LotFrontage'] = np.random.normal(70, 20, n)
-        # Inject Missing Values
         df.loc[np.random.choice(n, 50), 'LotFrontage'] = np.nan
-
         df['OverallQual'] = np.random.randint(1, 11, n)
         df['YearBuilt'] = np.random.randint(1900, 2020, n)
-
-        # Categorical Features
         neighborhoods = ['CollgCr', 'Veenker', 'Crawfor', 'NoRidge', 'Mitchel', 'Somerst', 'NWAmes', 'OldTown']
         df['Neighborhood'] = np.random.choice(neighborhoods, n)
-
         df['MSZoning'] = np.random.choice(['RL', 'RM', 'C (all)', 'FV', 'RH'], n)
         df['ExterQual'] = np.random.choice(['Gd', 'TA', 'Ex', 'Fa'], n)
-
-        # Random Features to fill up space
-        for i in range(1, 11):
-            df[f'NumFeat_{i}'] = np.random.rand(n)
-        for i in range(1, 6):
-            df[f'CatFeat_{i}'] = np.random.choice(['A', 'B', 'C', 'D'], n)
-
-        # Target
+        for i in range(1, 11): df[f'NumFeat_{i}'] = np.random.rand(n)
+        for i in range(1, 6): df[f'CatFeat_{i}'] = np.random.choice(['A', 'B', 'C', 'D'], n)
         if is_train:
-            # SalePrice correlated with GrLivArea and OverallQual
             noise = np.random.normal(0, 0.1, n)
             df['SalePrice'] = np.expm1(11 + 0.0005 * df['GrLivArea'] + 0.1 * df['OverallQual'] + noise)
-            # Make the outliers have low price (as per original dataset logic for removal)
             df.loc[df['GrLivArea'] > 4000, 'SalePrice'] = 200000
-
         return df
 
     train_df = generate_df(n_train, is_train=True)
     test_df = generate_df(n_test, is_train=False)
 
-    train_df.to_csv('train.csv', index=False)
-    test_df.to_csv('test.csv', index=False)
-    print("Synthetic data generated.")
+    train_df.to_csv(train_path, index=False)
+    test_df.to_csv(test_path, index=False)
+    print(f"Synthetic data generated at {base_dir}")
 
 # ------------------------------------------------------------------------------
 # 1. Data Preprocessing (Optimized for both Trees & NN)
@@ -370,9 +356,10 @@ if __name__ == "__main__":
     ensure_data_exists()
 
     # Load Data
-    print("Loading data...")
-    train = pd.read_csv('train.csv')
-    test = pd.read_csv('test.csv')
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"Loading data from {base_dir}...")
+    train = pd.read_csv(os.path.join(base_dir, 'train.csv'))
+    test = pd.read_csv(os.path.join(base_dir, 'test.csv'))
 
     # Preprocess
     preprocessor = DataPreprocessor()
@@ -459,8 +446,13 @@ if __name__ == "__main__":
         submission = pd.DataFrame()
         submission['Id'] = test_ids
         submission['SalePrice'] = pred_final
-        submission.to_csv('submission.csv', index=False)
-        print("Submission saved to submission.csv")
+        
+        # 获取脚本所在目录，确保文件保存在脚本同级
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path = os.path.join(base_dir, 'submission.transformer.csv')
+        
+        submission.to_csv(output_path, index=False)
+        print(f"Submission saved to {output_path}")
     else:
         print("No Test IDs found, submission not saved.")
 

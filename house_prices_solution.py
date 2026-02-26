@@ -35,9 +35,14 @@ warnings.filterwarnings('ignore')
 # ------------------------------------------------------------------------------
 # 1. 数据加载与预处理 (Data Loading & Preprocessing)
 # ------------------------------------------------------------------------------
+import os
+
+# 获取当前脚本所在目录
+base_path = os.path.dirname(os.path.abspath(__file__))
+
 print("正在加载数据...")
-train = pd.read_csv('train.csv')
-test = pd.read_csv('test.csv')
+train = pd.read_csv(os.path.join(base_path, 'train.csv'))
+test = pd.read_csv(os.path.join(base_path, 'test.csv'))
 
 # 保存ID用于提交
 train_ID = train['Id']
