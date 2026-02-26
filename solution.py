@@ -105,6 +105,7 @@ class DataPreprocessor:
             train = train.drop(train[(train['GrLivArea']>4000) & (train['SalePrice']<300000)].index)
 
         # 2. Target Transform
+        # Use log1p to handle skewness and ensure all models train in log-space
         y_train = np.log1p(train["SalePrice"].values)
 
         # 3. Concatenate
@@ -360,7 +361,16 @@ class TransformerRegressor(BaseEstimator, RegressorMixin):
                 batch_X = batch_X.to(self.device)
                 output = self.model(batch_X)
                 preds.append(output.cpu().numpy())
-        return np.vstack(preds).flatten()
+
+        # Explicit shape correction: (N, 1) -> (N,)
+        preds_array = np.vstack(preds).flatten()
+
+        # Stability: Clip to reasonable log-price range (e.g., 7.0 to 15.0)
+        # This prevents NaN propagation or extreme outliers from poisoning Stacking
+        preds_array = np.nan_to_num(preds_array, nan=12.0) # 12.0 is roughly median log price
+        preds_array = np.clip(preds_array, 7.0, 16.0)
+
+        return preds_array
 
 # ------------------------------------------------------------------------------
 # 3. Execution & Stacking
@@ -442,7 +452,7 @@ if __name__ == "__main__":
         use_features_in_secondary=True,
         cv=5,
         random_state=42,
-        n_jobs=1 # mlxtend + torch might have multiprocessing issues if n_jobs > 1
+        n_jobs=1
     )
 
     # Train
@@ -451,7 +461,10 @@ if __name__ == "__main__":
 
     # Predict
     print("Predicting...")
+    # All predictions are in log-space until this very last step
     pred_log = stack.predict(X_test)
+
+    # Final inverse transform
     pred_final = np.expm1(pred_log)
 
     # Submission
