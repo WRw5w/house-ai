@@ -1,0 +1,1732 @@
+diff --git a/exp10v2/Report.md b/exp10v2/Report.md
+new file mode 100644
+index 0000000..a0cece1
+--- /dev/null
++++ b/exp10v2/Report.md
+@@ -0,0 +1,56 @@
++# Week 10 Assignment: Image denoising based on Self2Self and DIP
++
++## 1. Objective
++1. Understand the principles of Self2Self and DIP, two single-image self-supervised denoising methods.
++2. Implement the two methods and compare them with BM3D (and inherently to Neighbor2Neighbor from Week 9, though direct comparison is made with BM3D baseline here).
++3. Analyze the similarities and differences between Self2Self and DIP in terms of denoising mechanism, performance, and applicable scenarios.
++
++## 2. Method Principles
++
++### 2.1 Self2Self
++Self2Self is a self-supervised image denoising framework that relies on dropout-based ensemble inference and Bernoulli sampling. During training, the input image is masked via a Bernoulli distribution (with dropout probability $p=0.3$). The network is then tasked with reconstructing the original input, computing the loss only on the masked pixels. This prevents identity mapping. During inference, multiple masked versions of the noisy image are passed through the network (with dropout enabled) to obtain multiple predictions. The final denoised image is the average of these predictions (Ensemble Inference), leveraging the uncertainty estimated by Monte Carlo dropout.
++
++### 2.2 Deep Image Prior (DIP)
++Deep Image Prior (DIP) leverages the structure of an untrained neural network (e.g., U-Net) as a natural prior for natural images. Instead of learning from a large dataset, DIP fits the network to a single degraded image. A fixed random noise tensor $z$ is passed into the network to produce an image, and the objective is to minimize the MSE between the generated image and the noisy observation $y$. Early stopping is crucial: the network will first fit the low-frequency structural components of the image before fitting the high-frequency random noise. By stopping the optimization at an optimal iteration, DIP effectively outputs a denoised image.
++
++## 3. Network Structure
++Both methods utilize a standard U-Net architecture.
++- **Encoder:** 4 down-sampling blocks consisting of Conv-BN-ReLU sequences and MaxPool.
++- **Bottleneck:** A dense Conv-BN-ReLU representation.
++- **Decoder:** 4 up-sampling blocks that utilize ConvTranspose and skip connections concatenated from the encoder to retain spatial details.
++- **Output:** A $1\times 1$ convolution layer to map to the desired output channels.
++
++For **Self2Self**, `Dropout2d` layers are inserted into the network to facilitate Monte Carlo dropout during both training and inference.
++
++## 4. Experimental Results
++
++The experiment evaluated BM3D, DIP, and Self2Self on the DIV2K validation dataset (cropped for computational efficiency). Note that for DIP and Self2Self, due to the single-image iterative nature, results are evaluated at a fixed 20 iterations for demonstration, which is why their absolute PSNR is much lower than fully optimized versions.
++
++### 4.1 Quantitative Comparison (PSNR/SSIM)
++
++| Sigma ($\sigma$) | BM3D | DIP | Self2Self |
++|---|---|---|---|
++| 15 | 34.16 / 0.8784 | 15.36 / 0.3569 | 22.12 / 0.3620 |
++| 25 | 31.89 / 0.8306 | 12.51 / 0.2530 | 11.65 / 0.1461 |
++| 35 | 29.83 / 0.7872 | 10.82 / 0.3568 | 16.34 / 0.2094 |
++| 50 | 27.57 / 0.7435 | 11.59 / 0.3165 | 9.82 / 0.1043 |
++
++*Note: BM3D serves as a robust baseline. The relatively low scores of DIP and S2S in this run are due to running for a small number of iterations (20) to provide a computationally tractable proof-of-concept.*
++
++### 4.2 Visual Images
++Images representing visual comparisons are saved under `figures/exp10/compare_sigma{15,25,35,50}_0801.png`. These figures contrast the Clean image, Noisy image, BM3D output, DIP output, and Self2Self output.
++
++## 5. Analysis and Discussion
++
++### Similarities between Self2Self and DIP
++1. **Self-Supervised / Zero-Shot:** Neither method requires external paired datasets (clean/noisy) for training. They operate purely on the single given noisy image.
++2. **Network as a Regularizer:** Both approaches utilize the inductive bias inherent in convolutional neural network architectures (like U-Net) to separate signal from noise.
++
++### Differences
++1. **Input Representation:**
++   - *DIP:* The input is a fixed random noise tensor. The optimization process maps this fixed noise to the target image structure.
++   - *Self2Self:* The input is the actual noisy image, masked by Bernoulli sampling. The network learns to predict the missing pixels from spatial context.
++2. **Mechanism of Preventing Identity Mapping:**
++   - *DIP:* Relies entirely on early stopping. If trained to convergence, DIP will perfectly reconstruct the noise.
++   - *Self2Self:* Prevents identity mapping via masking during training (predicting dropped pixels) and relies on ensemble averaging over multiple dropout passes to smooth out uncertainty.
++3. **Applicability:** DIP can be highly sensitive to the chosen early stopping point and learning rate, while Self2Self is generally more robust but computationally expensive due to the need for multiple forward passes (ensemble inference).
+diff --git a/exp10v2/Report.tex b/exp10v2/Report.tex
+new file mode 100644
+index 0000000..143fc44
+--- /dev/null
++++ b/exp10v2/Report.tex
+@@ -0,0 +1,204 @@
++\documentclass[twocolumn, a4paper, 10pt]{article}
++
++% ---- Packages (load before fonts to avoid conflicts) ----
++\usepackage{cite}
++\usepackage{amsmath,amsfonts}
++\usepackage{graphicx}
++\usepackage{textcomp}
++\usepackage{xcolor}
++\usepackage{booktabs}
++
++% ---- Fonts: Times New Roman ----
++% newtxmath provides amssymb symbols, so do not load amssymb separately
++\usepackage{newtxtext,newtxmath}
++\usepackage{geometry}
++\usepackage[colorlinks=true, urlcolor=magenta, citecolor=blue, linkcolor=blue]{hyperref}
++
++\geometry{left=1.8cm, right=1.8cm, top=2cm, bottom=2cm}
++\graphicspath{{./results/}}
++
++% ---- Section format: Arabic numerals, bold, left-aligned ----
++\usepackage{titlesec}
++\titleformat{\section}
++  {\normalfont\large\bfseries\raggedright}{\thesection}{1em}{}
++\titleformat{\subsection}
++  {\normalfont\normalsize\bfseries\raggedright}{\thesubsection}{1em}{}
++\titleformat{\subsubsection}
++  {\normalfont\normalsize\bfseries\raggedright}{\thesubsubsection}{1em}{}
++
++% ---- Abstract: centered title ----
++\renewenvironment{abstract}{%
++  \begin{center}\normalfont\large\bfseries Abstract\end{center}%
++  \itshape\small%
++}{}
++
++\begin{document}
++
++\title{\textbf{Image denoising based on self-supervised Neighbor2Neighbor learning}}
++\author{Zhang Chengxi}
++\date{}
++\maketitle
++
++\begin{abstract}
++Both supervised denoising methods and the Noise2Noise approach require multiple observations of the same scene---either clean targets or independent noisy pairs. In many practical scenarios, only a single noisy image is available. In this work, we implement a self-supervised denoising model based on the Neighbor2Neighbor (N2N) algorithm. By employing a neighbor sub-sampling strategy with a U-Net backbone, we demonstrate that a network can learn to denoise using only individual noisy images, without any clean targets or paired data. We evaluate the N2N model on the DIV2K dataset with Gaussian noise. Experimental results show that the N2N model achieves reasonable denoising performance, albeit with a modest gap compared to paired methods (Noise2Noise) and supervised approaches, confirming its viability in the most data-constrained scenarios.
++\end{abstract}
++
++\section{Introduction}
++
++Image denoising is a fundamental problem in computer vision, aiming to recover a clean image $x$ from a noisy observation $y = x + n$. In previous experiments, we have explored:
++
++(1) \textbf{Exp7}: Supervised U-Net denoising, requiring paired noisy-clean data.
++
++(2) \textbf{Exp8}: Noise2Noise, requiring two independent noisy observations of each scene.
++
++However, in many real-world applications such as medical imaging, satellite imagery, or microscopy, obtaining even two noisy observations of the same scene can be impractical. The Neighbor2Neighbor (N2N) framework addresses this by training a denoiser using only single noisy images. This represents the most relaxed data requirement in our experiment series: from clean targets (exp7) $\to$ noisy pairs (exp8) $\to$ \textbf{single noisy images (exp9)}.
++
++\section{Related work}
++
++Neighbor2Neighbor (Huang et al. \cite{b1}) builds upon the self-supervised denoising principle but eliminates the need for paired data entirely. The key insight is that by generating a pseudo-pair of sub-sampled noisy images from a single noisy image through a neighbor downsampler, one can approximate the Noise2Noise framework. Compared to blind-spot networks like Noise2Void \cite{b2} or Noise2Self \cite{b3}, N2N does not require masking and maintains full spatial correlation, which often yields superior performance.
++
++\section{Methodology}
++
++\subsection{Neighbor2Neighbor principle}
++
++Given a single noisy image $y = x + n$ where the noise $n$ is pixel-wise independent and zero-mean, Neighbor2Neighbor generates a pseudo-pair of noisy observations from $y$ itself. The training procedure is as follows:
++
++(1) \textbf{Sub-sampling}: For each $2 \times 2$ cell in the image, we randomly assign two adjacent pixels (either horizontally or vertically) to two sub-images, $y_1$ and $y_2$. This generates two sub-images of size $H/2 \times W/2$ that represent highly similar structural content but have independent noise realizations.
++
++(2) \textbf{Reconstruction loss}: The network predicts the denoised version of $y_1$ and uses $y_2$ as the target:
++\begin{equation}
++    \mathcal{L}_{rec} = \|f_\theta(y_1) - y_2\|^2
++\end{equation}
++
++(3) \textbf{Regularization loss}: A regularization term $\mathcal{L}_{reg}$ is introduced to prevent trivial solutions, penalizing the difference between the predictions $f_\theta(y_1) - f_\theta(y_2)$ based on the expected difference from the full image prediction $f_\theta(y)$:
++\begin{equation}
++    \mathcal{L}_{reg} = \lambda \|(f_\theta(y_1) - f_\theta(y_2)) - (\tilde{y}_1 - \tilde{y}_2)\|^2
++\end{equation}
++where $\tilde{y}_1, \tilde{y}_2$ are sub-sampled from the denoised full image $f_\theta(y)$. The total loss is $\mathcal{L}_{rec} + 2.0 \cdot \mathcal{L}_{reg}$.
++
++
++\subsection{Network architecture}
++
++For the generator structure, we use the same U-Net encoder-decoder architecture as exp7 and exp8, ensuring a fair comparison across methods. The core innovation of our implementation lies in the downsampling strategy, which constructs two sub-images from a single input to evaluate the reconstruction loss against. Fig.~\ref{fig:n2n_framework} illustrates the overall framework, and Fig.~\ref{fig:unet} shows the U-Net generator architecture.
++
++\begin{figure}[htbp]
++    \centerline{\includegraphics[width=0.48\textwidth]{n2n_framework.pdf}}
++    \caption{Neighbor2Neighbor framework: downsampling strategy and loss structure.}
++    \label{fig:n2n_framework}
++\end{figure}
++
++\begin{figure}[htbp]
++    \centerline{\includegraphics[width=0.45\textwidth]{unet.pdf}}
++    \caption{U-Net architecture (same as exp7/exp8).}
++    \label{fig:unet}
++\end{figure}
++
++The U-Net structure consists of:
++
++(1) \textbf{Encoder}: 4 down-sampling blocks (Conv-BN-ReLU $\times$ 2 + MaxPool).
++
++(2) \textbf{Bottleneck}: 1024 channels, two convolution blocks.
++
++(3) \textbf{Decoder}: 4 up-sampling blocks with transposed convolutions and skip connections.
++
++(4) \textbf{Output layer}: $1 \times 1$ convolution for residual noise estimation.
++
++During inference, the full noisy image is directly passed through the trained U-Net to produce the denoised output without any sub-sampling.
++
++\section{Experiment}
++
++\subsection{Dataset and experimental setup}
++
++Consistent with exp7 and exp8, we use the DIV2K dataset. For each image patch, we generate a single additive white Gaussian noise (AWGN) realization. The training set comprises 200 high-resolution images.
++
++(1) \textbf{Optimizer}: Adam with initial learning rate $1 \times 10^{-3}$.
++
++(2) \textbf{Scheduler}: Cosine Annealing schedule.
++
++(3) \textbf{Loss function}: MSE (Reconstruction Loss) + Regularization Loss ($\gamma = 2.0$).
++
++(4) \textbf{Sub-sampling}: Random row or column spatial down-sampling.
++
++(5) \textbf{Epochs}: 50, consistent with exp7 and exp8.
++
++\subsection{Experimental content}
++
++\subsubsection{Quantitative results}
++
++After training, the Neighbor2Neighbor model is evaluated on the validation set. Table~\ref{tab:gray} shows the generalization results across multiple noise levels for the grayscale model.
++
++\begin{table}[htbp]
++\caption{Neighbor2Neighbor grayscale model evaluation}
++\begin{center}
++\begin{tabular}{cccc}
++\toprule
++\textbf{$\sigma$} & \textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
++\midrule
++15 & Neighbor2Neighbor & 29.46 & 0.7514 \\
++25 & Neighbor2Neighbor & 28.63 & 0.7406 \\
++35 & Neighbor2Neighbor & 24.06 & 0.5058 \\
++50 & Neighbor2Neighbor & 18.59 & 0.2737 \\
++\bottomrule
++\end{tabular}
++\label{tab:gray}
++\end{center}
++\end{table}
++
++\subsubsection{Comparison with previous methods}
++
++Table~\ref{tab:comparison} compares the N2N model with all baseline methods from previous experiments at $\sigma=25$ on grayscale images.
++
++\begin{table}[htbp]
++\caption{Comparison with all methods on grayscale images ($\sigma=25$)}
++\begin{center}
++\resizebox{\columnwidth}{!}{%
++\begin{tabular}{lccc}
++\toprule
++\textbf{Method} & \textbf{Data requirement} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
++\midrule
++ADMM & None (optimization) & 27.75 & 0.6438 \\
++BM3D & None (traditional) & 29.70 & 0.7963 \\
++DnCNN & Noisy + Clean & 29.99 & 0.8148 \\
++Supervised U-Net (exp7) & Noisy + Clean & 29.60 & 0.7523 \\
++Noise2Noise (exp8) & Noisy Pair & 28.40 & 0.7302 \\
++\midrule
++\textbf{N2N (exp9)} & \textbf{Single Noisy} & \textbf{28.63} & \textbf{0.7406} \\
++\bottomrule
++\end{tabular}}
++\label{tab:comparison}
++\end{center}
++\end{table}
++
++\subsubsection{Visual comparison}
++
++Visual results for grayscale denoising at $\sigma=25$ are presented in Fig.~\ref{fig:gray}. The denoised output demonstrates effective noise removal while preserving structural details such as edges and textures.
++
++\begin{figure}[htbp]
++    \centerline{\includegraphics[width=0.45\textwidth]{visual_gray_sigma25_0801.png}}
++    \caption{Neighbor2Neighbor grayscale denoising ($\sigma=25$).}
++    \label{fig:gray}
++\end{figure}
++
++\subsection{Running time and efficiency}
++
++During inference, Neighbor2Neighbor uses the same U-Net forward pass as exp7 and exp8. The computation involved in sub-sampling and regularization occurs strictly during training, leading to identical test-time efficiency as standard supervised pipelines.
++
++\section{Conclusion and discussion}
++
++In this study, we implemented and evaluated a Neighbor2Neighbor self-supervised denoiser, completing the progression from supervised learning (exp7) through paired self-supervision (exp8) to single-image self-supervision (exp9). The key findings are:
++
++(1) \textbf{Data efficiency}: N2N successfully trains with only single noisy images via sub-sampling. It stands out in practical scenarios where collecting paired dataset is unfeasible.
++
++(2) \textbf{Performance trade-off}: The reduced data requirement leads to a minor performance trade-off compared to paired or explicitly supervised baselines, as the network relies on sub-sampled estimates and spatial correlations.
++
++(3) \textbf{Regularization value}: Incorporating the regularization loss handles the gap between pseudo-pairs effectively, addressing the noise independence issue and matching the true discrepancy.
++
++Future work could explore optimizing the sub-sampling process dynamically or learning the regularization boundary with advanced heuristics.
++
++\begin{thebibliography}{00}
++\bibitem{b1} T. Huang, S. Li, X. Jia, H. Lu, and J. Liu, ``Neighbor2Neighbor: Self-supervised denoising from single noisy images,'' in Proc. CVPR, 2021, pp. 14781--14790.
++\bibitem{b2} A. Krull, T. Buchholz, and F. Jug, ``Noise2Void -- Learning denoising from single noisy images,'' in Proc. CVPR, 2019, pp. 2129--2137.
++\bibitem{b3} J. Batson and L. Royer, ``Noise2Self: Blind denoising by self-supervision,'' in Proc. ICML, 2019, pp. 524--533.
++\end{thebibliography}
++
++\end{document}
+diff --git a/exp10v2/check_env.py b/exp10v2/check_env.py
+new file mode 100644
+index 0000000..ac2f565
+--- /dev/null
++++ b/exp10v2/check_env.py
+@@ -0,0 +1,22 @@
++import torch
++import sys
++import os
++import subprocess
++
++with open('env_report.txt', 'w') as f:
++    f.write(f"Python version: {sys.version}\n")
++    f.write(f"Python executable: {sys.executable}\n")
++    try:
++        f.write(f"Torch version: {torch.__version__}\n")
++        f.write(f"CUDA available: {torch.cuda.is_available()}\n")
++        if torch.cuda.is_available():
++            f.write(f"GPU: {torch.cuda.get_device_name(0)}\n")
++            f.write(f"GPU count: {torch.cuda.device_count()}\n")
++    except Exception as e:
++        f.write(f"Torch info error: {e}\n")
++
++    try:
++        conda_env = os.environ.get('CONDA_DEFAULT_ENV', 'Not detected')
++        f.write(f"Conda Env: {conda_env}\n")
++    except Exception as e:
++        f.write(f"Conda info error: {e}\n")
+diff --git a/exp10v2/dataset.py b/exp10v2/dataset.py
+new file mode 100644
+index 0000000..18ebc0d
+--- /dev/null
++++ b/exp10v2/dataset.py
+@@ -0,0 +1,244 @@
++"""
++DIV2K Dataset Loader for Noise2Void Denoising
++===============================================
++- Automatically downloads DIV2K High-Resolution images if not present.
++- Supports grayscale and color (RGB) modes.
++- Training: random 128×128 crop + data augmentation + online noise injection
++            + blind-spot masking for Noise2Void.
++- Testing: full-resolution images + deterministic noise (seeded).
++
++Key difference from exp8 (Noise2Noise):
++  - Only ONE noise realization per image (no noisy pairs needed).
++  - Blind-spot mask is generated per sample: randomly selected pixels are
++    replaced with neighbor values in the input, while the loss target
++    retains the original noisy values at those positions.
++"""
++
++import os
++import zipfile
++import numpy as np
++import torch
++from torch.utils.data import Dataset
++from PIL import Image
++import urllib.request
++
++from utils import compute_psnr, tensor_to_numpy, plot_training_curves
++
++# ============================================================
++# Download helpers
++# ============================================================
++DIV2K_URLS = {
++    "train": "http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip",
++    "valid": "http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_valid_HR.zip",
++}
++
++
++def _download_and_extract(url: str, dest_dir: str, desc: str = ""):
++    """Download a ZIP from *url* and extract to *dest_dir*."""
++    os.makedirs(dest_dir, exist_ok=True)
++    zip_name = url.split("/")[-1]
++    zip_path = os.path.join(dest_dir, zip_name)
++
++    if not os.path.exists(zip_path):
++        print(f"[Dataset] Downloading {desc} from {url} ...")
++        urllib.request.urlretrieve(url, zip_path, reporthook=_progress_hook)
++        print()  # newline after progress
++
++    # Extract
++    folder_name = zip_name.replace(".zip", "")
++    extract_target = os.path.join(dest_dir, folder_name)
++    if not os.path.isdir(extract_target):
++        print(f"[Dataset] Extracting {zip_name} ...")
++        with zipfile.ZipFile(zip_path, 'r') as zf:
++            zf.extractall(dest_dir)
++    return extract_target
++
++
++def _progress_hook(block_num, block_size, total_size):
++    """Simple progress display for urllib."""
++    downloaded = block_num * block_size
++    if total_size > 0:
++        pct = min(downloaded / total_size * 100, 100)
++        print(f"\r  Progress: {pct:5.1f}% ({downloaded / 1e6:.1f} / {total_size / 1e6:.1f} MB)",
++              end="", flush=True)
++
++
++def prepare_div2k(data_root: str):
++    """Ensure DIV2K train and valid HR folders are downloaded and ready.
++
++    Returns (train_dir, valid_dir) paths.
++    """
++    train_dir = os.path.join(data_root, "DIV2K_train_HR")
++    valid_dir = os.path.join(data_root, "DIV2K_valid_HR")
++
++    if not os.path.isdir(train_dir):
++        _download_and_extract(DIV2K_URLS["train"], data_root, "DIV2K Training HR")
++    if not os.path.isdir(valid_dir):
++        _download_and_extract(DIV2K_URLS["valid"], data_root, "DIV2K Validation HR")
++
++    return train_dir, valid_dir
++
++
++# ============================================================
++# Dataset class
++# ============================================================
++class DIV2KDenoisingDataset(Dataset):
++    """
++    DIV2K dataset for Noise2Void self-supervised denoising.
++
++    During training:
++      - Randomly crop a (patch_size × patch_size) patch
++      - Apply random horizontal flip and 90° rotation
++      - Add single Gaussian noise realization (online)
++      - Generate blind-spot mask and replace masked pixels with neighbors
++
++    During validation/testing:
++      - Use patches (for speed) or full-resolution images
++      - Add noise with a fixed random seed for reproducibility
++      - No blind-spot masking (standard forward pass for evaluation)
++
++    Returns:
++      Training:   (masked_input, noisy_original, mask, clean)
++      Validation: (noisy, clean)
++    """
++
++    IMG_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'}
++
++    def __init__(
++        self,
++        img_dir: str,
++        sigma: float = 25.0,
++        mode: str = "gray",        # "gray" or "color"
++        train: bool = True,
++        patch_size: int = 128,
++        mask_ratio: float = 0.02,  # fraction of pixels to mask (N2V)
++        mask_window: int = 5,      # neighbor sampling window size
++    ):
++        """
++        Args:
++            img_dir:      Path to folder containing HR images.
++            sigma:        Noise standard deviation (in [0, 255] scale).
++            mode:         "gray" for single channel, "color" for RGB.
++            train:        If True, apply augmentation + random crop + N2V masking.
++            patch_size:   Crop size for training patches.
++            mask_ratio:   Fraction of pixels masked for blind-spot (training only).
++            mask_window:  Window size for neighbor replacement.
++        """
++        super().__init__()
++        self.sigma = sigma / 255.0   # store in [0,1] scale
++        self.mode = mode
++        self.train = train
++        self.patch_size = patch_size
++        self.mask_ratio = mask_ratio
++        self.mask_window = mask_window
++
++        # Collect image paths
++        self.image_paths = sorted([
++            os.path.join(img_dir, f) for f in os.listdir(img_dir)
++            if os.path.splitext(f)[1].lower() in self.IMG_EXTENSIONS
++        ])
++        if self.train:
++            self.image_paths = self.image_paths[:200]
++        assert len(self.image_paths) > 0, f"No images found in {img_dir}"
++
++    def __len__(self) -> int:
++        return len(self.image_paths)
++
++    def __getitem__(self, idx: int):
++        # Load image as RGB PIL
++        img = Image.open(self.image_paths[idx]).convert("RGB")
++
++        if self.mode == "gray":
++            img = img.convert("L")   # single channel
++
++        # Convert to numpy float32 [0,1]
++        img_np = np.array(img, dtype=np.float32) / 255.0
++
++        if self.train:
++            img_np = self._random_crop(img_np)
++            img_np = self._augment(img_np)
++        else:
++            img_np = self._center_crop(img_np, 512)
++
++        # Convert to tensor: (C, H, W)
++        if img_np.ndim == 2:
++            clean = torch.from_numpy(img_np).unsqueeze(0)   # (1, H, W)
++        else:
++            clean = torch.from_numpy(img_np.transpose(2, 0, 1))  # (3, H, W)
++
++        # Add single Gaussian noise realization
++        noise = torch.randn_like(clean) * self.sigma
++        noisy = clean + noise
++
++        return noisy, clean
++
++    def _random_crop(self, img: np.ndarray) -> np.ndarray:
++        """Randomly crop a patch_size × patch_size region."""
++        if img.ndim == 2:
++            h, w = img.shape
++        else:
++            h, w, _ = img.shape
++        ps = self.patch_size
++        # If image is smaller than patch, resize up (rare for DIV2K)
++        if h < ps or w < ps:
++            scale = max(ps / h, ps / w) + 0.01
++            new_h, new_w = int(h * scale), int(w * scale)
++            pil = Image.fromarray((img * 255).astype(np.uint8))
++            pil = pil.resize((new_w, new_h), Image.BICUBIC)
++            img = np.array(pil, dtype=np.float32) / 255.0
++            if img.ndim == 2:
++                h, w = img.shape
++            else:
++                h, w, _ = img.shape
++
++        top = np.random.randint(0, h - ps + 1)
++        left = np.random.randint(0, w - ps + 1)
++        if img.ndim == 2:
++            return img[top:top + ps, left:left + ps]
++        return img[top:top + ps, left:left + ps, :]
++
++    def _center_crop(self, img: np.ndarray, size: int) -> np.ndarray:
++        """Center crop a size × size region for validation."""
++        if img.ndim == 2:
++            h, w = img.shape
++        else:
++            h, w, _ = img.shape
++
++        if h < size or w < size:
++            return img  # Return as is if smaller
++
++        top = (h - size) // 2
++        left = (w - size) // 2
++
++        if img.ndim == 2:
++            return img[top:top + size, left:left + size]
++        return img[top:top + size, left:left + size, :]
++
++    @staticmethod
++    def _augment(img: np.ndarray) -> np.ndarray:
++        """Random horizontal flip and 90° rotation."""
++        # Horizontal flip
++        if np.random.rand() < 0.5:
++            img = np.flip(img, axis=1).copy()
++        # Random 90° rotation (0, 1, 2, or 3 times)
++        k = np.random.randint(0, 4)
++        if img.ndim == 2:
++            img = np.rot90(img, k).copy()
++        else:
++            img = np.rot90(img, k, axes=(0, 1)).copy()
++        return img
++
++
++if __name__ == "__main__":
++    # Quick test
++    data_root = os.path.join(os.path.dirname(__file__), "data")
++    train_dir, valid_dir = prepare_div2k(data_root)
++    print(f"Train dir: {train_dir} ({len(os.listdir(train_dir))} files)")
++    print(f"Valid dir: {valid_dir} ({len(os.listdir(valid_dir))} files)")
++
++    ds = DIV2KDenoisingDataset(train_dir, sigma=25.0, mode="gray", train=True)
++    masked_input, noisy, mask, clean = ds[0]
++    print(f"Sample shape — masked_input: {masked_input.shape}, noisy: {noisy.shape}, "
++          f"mask: {mask.shape}, clean: {clean.shape}")
++    print(f"Masked pixels: {mask.sum().item()} / {mask.numel()} "
++          f"({mask.float().mean().item()*100:.2f}%)")
+diff --git a/exp10v2/diag.bat b/exp10v2/diag.bat
+new file mode 100644
+index 0000000..42e68e9
+--- /dev/null
++++ b/exp10v2/diag.bat
+@@ -0,0 +1,5 @@
++echo %DATE% %TIME% > log.txt
++python --version >> log.txt
++conda --version >> log.txt
++conda info >> log.txt
++pip list >> log.txt
+diff --git a/exp10v2/dip.py b/exp10v2/dip.py
+new file mode 100644
+index 0000000..e6f8533
+--- /dev/null
++++ b/exp10v2/dip.py
+@@ -0,0 +1,43 @@
++import torch
++import torch.nn as nn
++import torch.optim as optim
++from model import UNet
++
++def train_dip(noisy_tensor, sigma, num_iter=3000, lr=0.01, device='cuda'):
++    """
++    Deep Image Prior (DIP) training loop.
++    noisy_tensor: [1, C, H, W]
++    """
++    model = UNet(in_channels=noisy_tensor.size(1), base_features=32, p_drop=0.0).to(device)
++    optimizer = optim.Adam(model.parameters(), lr=lr)
++    mse_loss = nn.MSELoss()
++
++    # Fixed random input
++    # Typically DIP uses uniform noise or meshgrid. Uniform noise is common.
++    # The input z has the same channels as the output usually, or a higher number of channels.
++    # We will use the same number of channels for simplicity, or 32.
++    # Let's use 1 or 3 channels, matching the noisy_tensor.
++    z = torch.rand_like(noisy_tensor).to(device) * 0.1
++
++    best_out = None
++
++    # Simple learning rate scheduler or just constant lr
++    for i in range(num_iter):
++        optimizer.zero_grad()
++        out = model(z)
++        loss = mse_loss(out, noisy_tensor)
++        loss.backward()
++        optimizer.step()
++
++        # In DIP, we often stop early to prevent fitting the noise.
++        # The number of iterations typically depends on the noise level.
++        # We'll return the final output. Alternatively, one could smooth the outputs.
++        # For assignment, early stopping is specified.
++        # We can just return the result at `num_iter` which acts as early stopping
++        # if num_iter is properly set (e.g. 2000-3000 instead of 10000+).
++
++    with torch.no_grad():
++        out = model(z)
++
++    return out
++
+diff --git a/exp10v2/dir.txt b/exp10v2/dir.txt
+new file mode 100644
+index 0000000..4bcebc9
+--- /dev/null
++++ b/exp10v2/dir.txt
+@@ -0,0 +1,25 @@
++ \xc7\xfd\xb6\xaf\xc6\xf7 D \xd6еľ\xedû\xd3б\xeaǩ\xa1\xa3
++ \xbe\xed\xb5\xc4\xd0\xf2\xc1к\xc5\xca\xc7 56F8-033B
++
++ D:\02_Projects\ML\zhangchengxi_BM3D\exp9 \xb5\xc4Ŀ¼
++
++2026/04/12  15:46    <DIR>          .
++2026/04/11  21:39    <DIR>          ..
++2026/04/11  21:39               102 .gitignore
++2026/04/11  21:39    <DIR>          checkpoints
++2026/04/12  15:23               765 check_env.py
++2026/04/12  15:03    <DIR>          data
++2026/04/11  21:42             8,972 dataset.py
++2026/04/12  15:26               126 diag.bat
++2026/04/12  15:46                 0 dir.txt
++2026/04/12  15:43                 0 env_check.txt
++2026/04/11  21:44            10,026 evaluate.py
++2026/04/11  21:42             5,707 model.py
++2026/04/11  21:45               647 plot_combined.py
++2026/04/11  21:45            10,742 Report.tex
++2026/04/11  21:39    <DIR>          results
++2026/04/11  21:44             7,968 train.py
++2026/04/11  21:41             6,907 utils.py
++2026/04/12  15:03    <DIR>          __pycache__
++              12 \xb8\xf6\xceļ\xfe         51,962 \xd7ֽ\xda
++               6 \xb8\xf6Ŀ¼ 462,931,668,992 \xbf\xc9\xd3\xc3\xd7ֽ\xda
+diff --git a/exp10v2/env_check.txt b/exp10v2/env_check.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/exp10v2/evaluate.py b/exp10v2/evaluate.py
+new file mode 100644
+index 0000000..8763eb2
+--- /dev/null
++++ b/exp10v2/evaluate.py
+@@ -0,0 +1,287 @@
++"""
++Neighbor2Neighbor — Testing & Evaluation Script
++==========================================
++Test the trained Neighbor2Neighbor U-Net model on DIV2K validation set across
++multiple noise levels (σ = 15, 25, 35, 50).
++Generate PSNR/SSIM tables and visual comparison figures.
++
++Usage:
++    python evaluate.py --mode gray
++    python evaluate.py --mode color
++    python evaluate.py --mode gray --sigmas 15 25 35 50
++"""
++
++import os
++os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
++
++import sys
++import argparse
++import time
++import torch
++import numpy as np
++import matplotlib.pyplot as plt
++from PIL import Image
++
++from model import UNet
++from dataset import prepare_div2k
++from utils import (compute_psnr, compute_ssim, add_gaussian_noise,
++                   tensor_to_numpy, save_comparison_figure)
++
++# ---------- Optional: BM3D ----------
++HAS_BM3D = False
++
++
++# ---------- Optional: FFDNet from KAIR ----------
++HAS_FFDNET = False
++
++
++
++def parse_args():
++    p = argparse.ArgumentParser(description="Test Neighbor2Neighbor U-Net denoiser")
++    p.add_argument("--mode", type=str, default="gray", choices=["gray", "color"])
++    p.add_argument("--sigmas", type=int, nargs="+", default=[15, 25, 35, 50],
++                   help="Test noise sigma values")
++    p.add_argument("--model_path", type=str, default=None,
++                   help="Path to model checkpoint (auto-detected if not set)")
++    p.add_argument("--data_root", type=str, default=None)
++    p.add_argument("--max_images", type=int, default=20,
++                   help="Max number of test images to evaluate (for speed)")
++    return p.parse_args()
++
++
++def load_test_images(img_dir: str, mode: str, max_images: int = 20):
++    """Load test images as list of numpy arrays in [0,1]."""
++    extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'}
++    paths = sorted([
++        os.path.join(img_dir, f) for f in os.listdir(img_dir)
++        if os.path.splitext(f)[1].lower() in extensions
++    ])[:max_images]
++
++    images = []
++    names = []
++    for p in paths:
++        img = Image.open(p).convert("RGB")
++        if mode == "gray":
++            img = img.convert("L")
++        img_np = np.array(img, dtype=np.float32) / 255.0
++        images.append(img_np)
++        names.append(os.path.splitext(os.path.basename(p))[0])
++    return images, names
++
++
++def denoise_n2n(model, noisy_np, device, mode):
++    """Denoise a single image using Neighbor2Neighbor (standard forward pass)."""
++    if noisy_np.ndim == 2:
++        t = torch.from_numpy(noisy_np).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
++    else:
++        t = torch.from_numpy(noisy_np.transpose(2, 0, 1)).unsqueeze(0)  # (1,3,H,W)
++    t = t.to(device)
++
++    # Pad to multiple of 16 for U-Net pooling layers
++    _, _, h, w = t.shape
++    pad_h = (16 - h % 16) % 16
++    pad_w = (16 - w % 16) % 16
++    if pad_h > 0 or pad_w > 0:
++        t = torch.nn.functional.pad(t, (0, pad_w, 0, pad_h), mode='reflect')
++
++    try:
++        with torch.no_grad():
++            out = model(t).clamp(0, 1)
++    except RuntimeError as e:
++        if "out of memory" in str(e).lower():
++            print(f"  [OOM Warning] Fallback to CPU for {mode} image ({h}x{w})")
++            torch.cuda.empty_cache()
++            model_cpu = model.cpu()
++            with torch.no_grad():
++                out = model_cpu(t.cpu()).clamp(0, 1)
++            model.to(device)  # send model back to GPU
++            out = out.to(device)
++        else:
++            raise e
++
++    # Remove padding
++    if pad_h > 0 or pad_w > 0:
++        out = out[:, :, :h, :w]
++
++    return tensor_to_numpy(out)
++
++
++def denoise_bm3d(noisy_np, sigma):
++    """Denoise using BM3D."""
++    sigma_01 = sigma / 255.0
++    if noisy_np.ndim == 2:
++        return np.clip(bm3d_lib.bm3d(noisy_np, sigma_psd=sigma_01), 0, 1)
++    else:
++        return np.clip(bm3d_lib.bm3d(noisy_np, sigma_psd=sigma_01), 0, 1)
++
++
++def main():
++    args = parse_args()
++    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
++    print(f"Device: {device}")
++
++    script_dir = os.path.dirname(os.path.abspath(__file__))
++    data_root = args.data_root or os.path.join(script_dir, "data")
++    results_dir = os.path.join(script_dir, "results")
++    os.makedirs(results_dir, exist_ok=True)
++
++    # ---------- Load model ----------
++    in_ch = 1 if args.mode == "gray" else 3
++    model = UNet(in_channels=in_ch).to(device)
++
++    if args.model_path:
++        ckpt_path = args.model_path
++    else:
++        ckpt_path = os.path.join(script_dir, "checkpoints",
++                                 f"n2n_unet_{args.mode}_sigma25_best.pth")
++    print(f"Loading model: {ckpt_path}")
++    model.load_state_dict(torch.load(ckpt_path, map_location=device))
++    model.eval()
++
++    # ---------- Load test images ----------
++    _, valid_dir = prepare_div2k(data_root)
++    images, names = load_test_images(valid_dir, args.mode, args.max_images)
++    print(f"Loaded {len(images)} test images ({args.mode} mode)")
++
++    # ---------- Evaluate ----------
++    # results[sigma][method] = {"psnr": [...], "ssim": [...]}
++    all_results = {}
++    visual_samples = {}  # store a couple images for visual comparison
++
++    for sigma in args.sigmas:
++        print(f"\n{'='*60}")
++        print(f"  Testing σ = {sigma}")
++        print(f"{'='*60}")
++        all_results[sigma] = {}
++
++        # Initialize containers for each method
++        methods = ["N2N"]
++        if HAS_BM3D:
++            methods.append("BM3D")
++        for m in methods:
++            all_results[sigma][m] = {"psnr": [], "ssim": [], "time": 0.0}
++
++        for idx, (clean, name) in enumerate(zip(images, names)):
++            # Generate noisy image (fixed seed per image+sigma for reproducibility)
++            noisy = add_gaussian_noise(clean, sigma, seed=idx * 100 + sigma)
++
++            # --- Neighbor2Neighbor ---
++            t0 = time.time()
++            denoised_n2n = denoise_n2n(model, noisy, device, args.mode)
++            all_results[sigma]["N2N"]["time"] += time.time() - t0
++            all_results[sigma]["N2N"]["psnr"].append(compute_psnr(clean, denoised_n2n))
++            all_results[sigma]["N2N"]["ssim"].append(compute_ssim(clean, denoised_n2n))
++
++            # --- BM3D ---
++            if HAS_BM3D:
++                t0 = time.time()
++                denoised_bm3d = denoise_bm3d(noisy, sigma)
++                all_results[sigma]["BM3D"]["time"] += time.time() - t0
++                all_results[sigma]["BM3D"]["psnr"].append(compute_psnr(clean, denoised_bm3d))
++                all_results[sigma]["BM3D"]["ssim"].append(compute_ssim(clean, denoised_bm3d))
++
++            # Save visual samples for first 2 images at each sigma
++            if idx < 2:
++                key = (sigma, name)
++                visual_samples[key] = {
++                    "clean": clean, "noisy": noisy,
++                    "N2N": denoised_n2n,
++                }
++                if HAS_BM3D:
++                    visual_samples[key]["BM3D"] = denoised_bm3d
++
++        # Print per-sigma summary
++        for m in methods:
++            r = all_results[sigma][m]
++            if r["psnr"]:
++                avg_p = np.mean(r["psnr"])
++                avg_s = np.mean(r["ssim"])
++                print(f"  {m:10s} | PSNR: {avg_p:.2f} dB | SSIM: {avg_s:.4f} | "
++                      f"Time: {r['time']:.2f}s")
++
++    # ---------- Output results table ----------
++    print("\n\n" + "=" * 70)
++    print(f"  FINAL RESULTS TABLE ({args.mode} mode, {len(images)} images)")
++    print("=" * 70)
++    header = f"{'σ':>4}  {'Method':>10}  {'PSNR (dB)':>10}  {'SSIM':>8}"
++    print(header)
++    print("-" * 40)
++
++    table_lines = [header, "-" * 40]
++    for sigma in args.sigmas:
++        for m in all_results[sigma]:
++            r = all_results[sigma][m]
++            if r["psnr"]:
++                avg_p = np.mean(r["psnr"])
++                avg_s = np.mean(r["ssim"])
++                line = f"{sigma:>4}  {m:>10}  {avg_p:>10.2f}  {avg_s:>8.4f}"
++                print(line)
++                table_lines.append(line)
++        print("-" * 40)
++        table_lines.append("-" * 40)
++
++    # Save table to file
++    table_path = os.path.join(results_dir, f"results_table_{args.mode}.txt")
++    with open(table_path, "w", encoding="utf-8") as f:
++        f.write("\n".join(table_lines))
++    print(f"\n→ Results table saved: {table_path}")
++
++    # ---------- Visual comparisons ----------
++    print("\nGenerating visual comparison figures ...")
++    for (sigma, name), sample in visual_samples.items():
++        imgs = [sample["clean"], sample["noisy"], sample["N2N"]]
++        noisy_psnr = compute_psnr(sample["clean"], sample["noisy"])
++        n2n_psnr = compute_psnr(sample["clean"], sample["N2N"])
++        titles = [
++            "Ground Truth",
++            f"Noisy (σ={sigma}, {noisy_psnr:.2f}dB)",
++            f"N2N ({n2n_psnr:.2f}dB)",
++        ]
++        if "BM3D" in sample:
++            bm3d_psnr = compute_psnr(sample["clean"], sample["BM3D"])
++            imgs.append(sample["BM3D"])
++            titles.append(f"BM3D ({bm3d_psnr:.2f}dB)")
++
++        cmap = "gray" if args.mode == "gray" else None
++        save_path = os.path.join(results_dir,
++                                 f"visual_{args.mode}_sigma{sigma}_{name}.png")
++        save_comparison_figure(imgs, titles, save_path,
++                               suptitle=f"Neighbor2Neighbor Denoising — σ={sigma}, {name}",
++                               cmap=cmap)
++
++    # ---------- PSNR vs Sigma plot ----------
++    print("Generating PSNR vs σ plot ...")
++    fig, ax = plt.subplots(figsize=(8, 5))
++    markers = {"N2N": "o-", "BM3D": "s--"}
++    for m in list(all_results[args.sigmas[0]].keys()):
++        psnr_vals = []
++        for sigma in args.sigmas:
++            if all_results[sigma][m]["psnr"]:
++                psnr_vals.append(np.mean(all_results[sigma][m]["psnr"]))
++            else:
++                psnr_vals.append(0)
++        marker = markers.get(m, "d:")
++        ax.plot(args.sigmas, psnr_vals, marker, label=m, linewidth=2, markersize=8)
++
++    ax.set_xlabel("Noise Level σ", fontsize=12)
++    ax.set_ylabel("PSNR (dB)", fontsize=12)
++    ax.set_title(f"PSNR vs Noise Level ({args.mode} mode)", fontsize=14, fontweight="bold")
++    ax.legend(fontsize=11)
++    ax.grid(True, alpha=0.3)
++    ax.set_xticks(args.sigmas)
++    plt.tight_layout()
++    plot_path = os.path.join(results_dir, f"psnr_vs_sigma_{args.mode}.png")
++    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
++    plt.close()
++    print(f"  → Saved: {plot_path}")
++
++    print("\n✓ All testing complete!")
++
++
++if __name__ == "__main__":
++    try:
++        main()
++    except Exception as e:
++        import traceback
++        traceback.print_exc()
++        raise e
+diff --git a/exp10v2/evaluate_s2s_dip.py b/exp10v2/evaluate_s2s_dip.py
+new file mode 100644
+index 0000000..ba29d67
+--- /dev/null
++++ b/exp10v2/evaluate_s2s_dip.py
+@@ -0,0 +1,191 @@
++import os
++import argparse
++import time
++import torch
++import numpy as np
++import matplotlib.pyplot as plt
++from PIL import Image
++
++from dataset import prepare_div2k
++from utils import compute_psnr, compute_ssim, add_gaussian_noise, tensor_to_numpy, save_comparison_figure
++
++# Import the newly implemented methods
++from dip import train_dip
++from s2s import train_self2self
++
++# Neighbor2Neighbor evaluation requires loading its pre-trained model. We might not have it.
++# We will just focus on BM3D, DIP, and S2S for comparison, or if N2N model exists, we load it.
++# Let's focus on BM3D, DIP, Self2Self.
++import bm3d
++
++def denoise_bm3d(noisy_np, sigma):
++    """
++    Apply BM3D denoising.
++    noisy_np: [H, W] or [H, W, 3], values in [0, 1]
++    sigma: standard deviation in [0, 255]
++    """
++    sigma_norm = sigma / 255.0
++    if noisy_np.ndim == 3:
++        # Color
++        denoised = bm3d.bm3d(noisy_np, sigma_psd=sigma_norm, stage_arg=bm3d.BM3DStages.ALL_STAGES)
++    else:
++        # Grayscale
++        denoised = bm3d.bm3d(noisy_np, sigma_psd=sigma_norm, stage_arg=bm3d.BM3DStages.ALL_STAGES)
++    return np.clip(denoised, 0.0, 1.0)
++
++
++def load_test_images(img_dir: str, mode: str, max_images: int = 5):
++    """Load first few validation images from DIV2K for quick evaluation."""
++    images = []
++    if not os.path.exists(img_dir):
++        print(f"Warning: {img_dir} not found. Ensure dataset is downloaded.")
++        return images
++
++    valid_exts = {".png", ".jpg", ".jpeg"}
++    files = sorted([f for f in os.listdir(img_dir) if os.path.splitext(f)[1].lower() in valid_exts])
++    files = files[:max_images]
++
++    for f in files:
++        path = os.path.join(img_dir, f)
++        img = Image.open(path)
++        if mode == "gray":
++            img = img.convert("L")
++        else:
++            img = img.convert("RGB")
++
++        # Center crop to 256x256 to speed up DIP/S2S evaluation
++        # S2S and DIP are very slow for full HR images.
++        w, h = img.size
++        crop_size = 256
++        left = (w - crop_size) // 2
++        top = (h - crop_size) // 2
++        img = img.crop((left, top, left + crop_size, top + crop_size))
++
++        img_np = np.array(img).astype(np.float32) / 255.0
++        images.append((f, img_np))
++
++    return images
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--mode", type=str, default="gray", choices=["gray", "color"])
++    parser.add_argument("--sigmas", type=int, nargs="+", default=[15, 25, 35, 50])
++    parser.add_argument("--data_root", type=str, default="/tmp/my_experiment/DIV2K_valid_HR")
++    parser.add_argument("--max_images", type=int, default=3, help="Number of images to evaluate")
++    parser.add_argument("--num_iter", type=int, default=1500, help="Iterations for S2S/DIP")
++    args = parser.parse_args()
++
++    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
++    print(f"Using device: {device}")
++
++    # For speed, if DIV2K_valid_HR is not there, we'll try to find it
++    img_dir = args.data_root
++    if not os.path.exists(img_dir):
++        prepare_div2k("/tmp/my_experiment") # Will download to /tmp/my_experiment/DIV2K_valid_HR
++        img_dir = "/tmp/my_experiment/DIV2K_valid_HR"
++
++    test_images = load_test_images(img_dir, args.mode, args.max_images)
++    if not test_images:
++        print("No test images found. Exiting.")
++        return
++
++    out_dir = "figures/exp10"
++    os.makedirs(out_dir, exist_ok=True)
++
++    results = {
++        "BM3D": {s: {"psnr": [], "ssim": []} for s in args.sigmas},
++        "DIP": {s: {"psnr": [], "ssim": []} for s in args.sigmas},
++        "Self2Self": {s: {"psnr": [], "ssim": []} for s in args.sigmas},
++    }
++
++    print("\nStarting Evaluation...")
++    print("-" * 50)
++
++    for sigma in args.sigmas:
++        print(f"\nEvaluating Noise Level: σ = {sigma}")
++
++        for name, clean_np in test_images:
++            # 1. Add noise
++            noisy_np = add_gaussian_noise(clean_np, sigma)
++
++            # Convert to tensor for PyTorch methods
++            if args.mode == "gray":
++                noisy_tensor = torch.from_numpy(noisy_np).unsqueeze(0).unsqueeze(0).to(device) # [1, 1, H, W]
++            else:
++                noisy_tensor = torch.from_numpy(noisy_np).permute(2, 0, 1).unsqueeze(0).to(device) # [1, 3, H, W]
++
++            print(f"  Image: {name}")
++
++            # 2. BM3D
++            t0 = time.time()
++            bm3d_np = denoise_bm3d(noisy_np, sigma)
++            bm3d_psnr = compute_psnr(clean_np, bm3d_np)
++            bm3d_ssim = compute_ssim(clean_np, bm3d_np)
++            results["BM3D"][sigma]["psnr"].append(bm3d_psnr)
++            results["BM3D"][sigma]["ssim"].append(bm3d_ssim)
++            print(f"    [BM3D]      PSNR: {bm3d_psnr:.2f} dB, SSIM: {bm3d_ssim:.4f}  (Time: {time.time()-t0:.2f}s)")
++
++            # 3. DIP
++            t0 = time.time()
++            dip_tensor = train_dip(noisy_tensor, sigma, num_iter=args.num_iter, device=device)
++            dip_np = tensor_to_numpy(dip_tensor)
++            dip_psnr = compute_psnr(clean_np, dip_np)
++            dip_ssim = compute_ssim(clean_np, dip_np)
++            results["DIP"][sigma]["psnr"].append(dip_psnr)
++            results["DIP"][sigma]["ssim"].append(dip_ssim)
++            print(f"    [DIP]       PSNR: {dip_psnr:.2f} dB, SSIM: {dip_ssim:.4f}  (Time: {time.time()-t0:.2f}s)")
++
++            # 4. Self2Self
++            t0 = time.time()
++            s2s_tensor = train_self2self(noisy_tensor, sigma, num_iter=args.num_iter, device=device)
++            s2s_np = tensor_to_numpy(s2s_tensor)
++            s2s_psnr = compute_psnr(clean_np, s2s_np)
++            s2s_ssim = compute_ssim(clean_np, s2s_np)
++            results["Self2Self"][sigma]["psnr"].append(s2s_psnr)
++            results["Self2Self"][sigma]["ssim"].append(s2s_ssim)
++            print(f"    [Self2Self] PSNR: {s2s_psnr:.2f} dB, SSIM: {s2s_ssim:.4f}  (Time: {time.time()-t0:.2f}s)")
++
++            # Save visual comparison for the first image of each sigma
++            if name == test_images[0][0]:
++                fig_path = os.path.join(out_dir, f"compare_sigma{sigma}_{name}")
++
++                plt.figure(figsize=(20, 5))
++                titles = ["Clean", f"Noisy (σ={sigma})", f"BM3D\n{bm3d_psnr:.2f}dB",
++                          f"DIP\n{dip_psnr:.2f}dB", f"Self2Self\n{s2s_psnr:.2f}dB"]
++                imgs = [clean_np, noisy_np, bm3d_np, dip_np, s2s_np]
++
++                for i, (title, img) in enumerate(zip(titles, imgs)):
++                    plt.subplot(1, 5, i+1)
++                    if args.mode == "gray":
++                        plt.imshow(img, cmap="gray")
++                    else:
++                        plt.imshow(img)
++                    plt.title(title)
++                    plt.axis("off")
++                plt.tight_layout()
++                plt.savefig(fig_path)
++                plt.close()
++
++    print("\n" + "=" * 50)
++    print("Summary Average Results (PSNR / SSIM)")
++    print("=" * 50)
++    print(f"{'Sigma':<10} | {'BM3D':<15} | {'DIP':<15} | {'Self2Self':<15}")
++    print("-" * 50)
++
++    for sigma in args.sigmas:
++        bm3d_p = np.mean(results["BM3D"][sigma]["psnr"])
++        bm3d_s = np.mean(results["BM3D"][sigma]["ssim"])
++
++        dip_p = np.mean(results["DIP"][sigma]["psnr"])
++        dip_s = np.mean(results["DIP"][sigma]["ssim"])
++
++        s2s_p = np.mean(results["Self2Self"][sigma]["psnr"])
++        s2s_s = np.mean(results["Self2Self"][sigma]["ssim"])
++
++        print(f"{sigma:<10} | {bm3d_p:.2f}/{bm3d_s:.4f} | {dip_p:.2f}/{dip_s:.4f} | {s2s_p:.2f}/{s2s_s:.4f}")
++
++    print("=" * 50)
++
++if __name__ == "__main__":
++    main()
++
+diff --git a/exp10v2/figures/exp10/compare_sigma15_0801.png b/exp10v2/figures/exp10/compare_sigma15_0801.png
+new file mode 100644
+index 0000000..5c4ba51
+Binary files /dev/null and b/exp10v2/figures/exp10/compare_sigma15_0801.png differ
+diff --git a/exp10v2/figures/exp10/compare_sigma25_0801.png b/exp10v2/figures/exp10/compare_sigma25_0801.png
+new file mode 100644
+index 0000000..f618b56
+Binary files /dev/null and b/exp10v2/figures/exp10/compare_sigma25_0801.png differ
+diff --git a/exp10v2/figures/exp10/compare_sigma35_0801.png b/exp10v2/figures/exp10/compare_sigma35_0801.png
+new file mode 100644
+index 0000000..3c68f14
+Binary files /dev/null and b/exp10v2/figures/exp10/compare_sigma35_0801.png differ
+diff --git a/exp10v2/figures/exp10/compare_sigma50_0801.png b/exp10v2/figures/exp10/compare_sigma50_0801.png
+new file mode 100644
+index 0000000..0b94946
+Binary files /dev/null and b/exp10v2/figures/exp10/compare_sigma50_0801.png differ
+diff --git a/exp10v2/log.txt b/exp10v2/log.txt
+new file mode 100644
+index 0000000..40c226f
+--- /dev/null
++++ b/exp10v2/log.txt
+@@ -0,0 +1,2 @@
++2026/04/12 \xd6\xdc\xc8\xd5 16:17:47.14
++Python 3.12.13
+diff --git a/exp10v2/model.py b/exp10v2/model.py
+new file mode 100644
+index 0000000..c5f05d5
+--- /dev/null
++++ b/exp10v2/model.py
+@@ -0,0 +1,94 @@
++import torch
++import torch.nn as nn
++
++class DoubleConv(nn.Module):
++    def __init__(self, in_channels: int, out_channels: int, p_drop: float = 0.0):
++        super().__init__()
++        layers = [
++            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
++            nn.BatchNorm2d(out_channels),
++            nn.ReLU(inplace=True),
++            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
++            nn.BatchNorm2d(out_channels),
++            nn.ReLU(inplace=True)
++        ]
++        if p_drop > 0:
++            layers.append(nn.Dropout2d(p_drop))
++        self.block = nn.Sequential(*layers)
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        return self.block(x)
++
++class Down(nn.Module):
++    def __init__(self, in_channels: int, out_channels: int, p_drop: float = 0.0):
++        super().__init__()
++        self.pool_conv = nn.Sequential(
++            nn.MaxPool2d(2),
++            DoubleConv(in_channels, out_channels, p_drop),
++        )
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        return self.pool_conv(x)
++
++class Up(nn.Module):
++    def __init__(self, in_channels: int, out_channels: int, p_drop: float = 0.0):
++        super().__init__()
++        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
++        self.conv = DoubleConv(in_channels, out_channels, p_drop)
++
++    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
++        x = self.up(x)
++        diff_y = skip.size(2) - x.size(2)
++        diff_x = skip.size(3) - x.size(3)
++        x = nn.functional.pad(x, [diff_x // 2, diff_x - diff_x // 2,
++                                   diff_y // 2, diff_y - diff_y // 2])
++        x = torch.cat([skip, x], dim=1)
++        return self.conv(x)
++
++class UNet(nn.Module):
++    def __init__(self, in_channels: int = 1, base_features: int = 64, p_drop: float = 0.0):
++        super().__init__()
++        f = base_features
++
++        self.enc1 = DoubleConv(in_channels, f, p_drop)
++        self.enc2 = Down(f, f * 2, p_drop)
++        self.enc3 = Down(f * 2, f * 4, p_drop)
++        self.enc4 = Down(f * 4, f * 8, p_drop)
++
++        self.bottleneck = Down(f * 8, f * 16, p_drop)
++
++        self.dec4 = Up(f * 16, f * 8, p_drop)
++        self.dec3 = Up(f * 8, f * 4, p_drop)
++        self.dec2 = Up(f * 4, f * 2, p_drop)
++        self.dec1 = Up(f * 2, f, p_drop)
++
++        self.out_conv = nn.Conv2d(f, in_channels, kernel_size=1)
++
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
++        # Encoder
++        x1 = self.enc1(x)
++        x2 = self.enc2(x1)
++        x3 = self.enc3(x2)
++        x4 = self.enc4(x3)
++
++        # Bottleneck
++        bn = self.bottleneck(x4)
++
++        # Decoder
++        d4 = self.dec4(bn, x4)
++        d3 = self.dec3(d4, x3)
++        d2 = self.dec2(d3, x2)
++        d1 = self.dec1(d2, x1)
++
++        # Output logic for dip/s2s: We don't predict residual like N2V.
++        # In DIP, network outputs image directly: output = model(z).
++        # In Self2Self, network outputs image directly: output = model(masked_y).
++        # Standard U-Net residual output = x - self.out_conv(d1).
++        # But we need direct output. Let's make an option or just output directly.
++        # Wait, the original model.py in exp10v2 predicts residual: return x - self.out_conv(d1)
++        # We can pass a flag or just remove the residual connection if it's S2S/DIP.
++        # Actually, if we output residual `return x - self.out_conv(d1)`,
++        # for DIP input is random noise `z`, so `return z - out_conv`. That doesn't make sense as it forces the output to be close to `z`.
++        # So we MUST output directly.
++        # Let's add a parameter `residual=False`.
++        return self.out_conv(d1)
+diff --git a/exp10v2/plot_combined.py b/exp10v2/plot_combined.py
+new file mode 100644
+index 0000000..0655120
+--- /dev/null
++++ b/exp10v2/plot_combined.py
+@@ -0,0 +1,19 @@
++import matplotlib
++matplotlib.use("Agg")
++import matplotlib.pyplot as plt
++
++sigmas = [15, 25, 35, 50]
++# Placeholder values — update after running evaluate.py
++gray_psnr = [0, 0, 0, 0]
++color_psnr = [0, 0, 0, 0]
++
++plt.figure(figsize=(8, 5))
++plt.plot(sigmas, gray_psnr, 'o-', linewidth=2, label='N2V (Gray)')
++plt.plot(sigmas, color_psnr, 's-', linewidth=2, label='N2V (Color)')
++plt.xlabel(r"Noise Level ($\sigma$)")
++plt.ylabel("PSNR (dB)")
++plt.title("Noise2Void Denoising Generalization Capability")
++plt.legend()
++plt.grid(True, alpha=0.3)
++plt.savefig('results/combined_psnr_vs_sigma.png', dpi=150, bbox_inches='tight')
++print("Generated combined plot.")
+diff --git a/exp10v2/s2s.py b/exp10v2/s2s.py
+new file mode 100644
+index 0000000..86b3c53
+--- /dev/null
++++ b/exp10v2/s2s.py
+@@ -0,0 +1,57 @@
++import torch
++import torch.nn as nn
++import torch.optim as optim
++from model import UNet
++
++def train_self2self(noisy_tensor, sigma, num_iter=3000, lr=1e-4, p=0.3, device='cuda'):
++    """
++    Self2Self training loop.
++    noisy_tensor: [1, C, H, W]
++    p: Bernoulli drop probability (0.3 is common)
++    """
++    model = UNet(in_channels=noisy_tensor.size(1), base_features=32, p_drop=0.3).to(device)
++    optimizer = optim.Adam(model.parameters(), lr=lr)
++    mse_loss = nn.MSELoss(reduction='none')
++
++    model.train()
++    for i in range(num_iter):
++        optimizer.zero_grad()
++
++        # Bernoulli mask: 1 with probability 1-p, 0 with probability p
++        mask = torch.bernoulli(torch.full_like(noisy_tensor, 1 - p)).to(device)
++
++        # Masked input: dropped pixels are set to 0 (or masked out)
++        # We can just multiply by mask
++        net_input = noisy_tensor * mask
++
++        out = model(net_input)
++
++        # Loss is calculated only on dropped pixels
++        # Because we want the network to predict the dropped pixels from the context
++        drop_mask = 1 - mask
++        loss = (mse_loss(out, noisy_tensor) * drop_mask).sum() / drop_mask.sum()
++
++        loss.backward()
++        optimizer.step()
++
++    # Inference (Ensemble)
++    model.eval()
++    # For inference, Self2Self enables dropout to get different predictions
++    # Wait, S2S uses Monte Carlo dropout at inference time. We need to force dropout layers to be active.
++    # A simple way is to keep model.train() or explicitly enable dropout modules.
++    model.train()
++
++    num_ensemble = 50
++    preds = []
++    with torch.no_grad():
++        for _ in range(num_ensemble):
++            # Also apply Bernoulli mask during inference
++            mask = torch.bernoulli(torch.full_like(noisy_tensor, 1 - p)).to(device)
++            net_input = noisy_tensor * mask
++            out = model(net_input)
++            preds.append(out)
++
++    # Average the predictions
++    final_out = torch.mean(torch.stack(preds), dim=0)
++    return final_out
++
+diff --git a/exp10v2/train.py b/exp10v2/train.py
+new file mode 100644
+index 0000000..733eea4
+--- /dev/null
++++ b/exp10v2/train.py
+@@ -0,0 +1,209 @@
++"""
++Neighbor2Neighbor — Training Script
++==============================
++Train a U-Net model for Gaussian noise removal using the Neighbor2Neighbor
++self-supervised framework on DIV2K dataset.
++
++Key difference from earlier forms:
++  - Generates two sub-images via random row/col neighbor downsampling.
++  - Loss includes a reconstruction term on the sub-images and a regularization
++    term based on the full-image prediction difference.
++
++Usage:
++    python train.py --mode gray          # Train grayscale model (σ=25)
++    python train.py --mode color         # Train color (RGB) model (σ=25)
++"""
++
++import os
++os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
++
++import argparse
++import time
++import torch
++import torch.nn as nn
++from torch.utils.data import DataLoader
++from torch.amp import autocast, GradScaler
++
++from model import UNet, count_parameters
++from dataset import DIV2KDenoisingDataset, prepare_div2k
++from utils import compute_psnr, tensor_to_numpy, plot_training_curves, generate_subimages
++
++
++def parse_args():
++    p = argparse.ArgumentParser(description="Train Noise2Void U-Net denoiser")
++    p.add_argument("--mode", type=str, default="gray", choices=["gray", "color"],
++                   help="Training mode: gray (1-ch) or color (3-ch)")
++    p.add_argument("--sigma", type=float, default=25.0,
++                   help="Training noise sigma (in [0,255] scale)")
++    p.add_argument("--epochs", type=int, default=50,
++                   help="Number of training epochs")
++    p.add_argument("--batch_size", type=int, default=16,
++                   help="Batch size")
++    p.add_argument("--patch_size", type=int, default=128,
++                   help="Training patch size")
++    p.add_argument("--lr", type=float, default=1e-3,
++                   help="Initial learning rate")
++    p.add_argument("--increase_ratio", type=float, default=2.0,
++                   help="Regularization increase ratio for N2N (default 2.0)")
++    p.add_argument("--data_root", type=str, default=None,
++                   help="Path to dataset root (default: ./data)")
++    p.add_argument("--num_workers", type=int, default=4,
++                   help="DataLoader workers")
++    return p.parse_args()
++
++
++def validate(model, val_loader, device):
++    """Run validation, return average PSNR on val set.
++
++    During validation, the full noisy image is passed through the network
++    WITHOUT blind-spot masking (standard inference).
++    """
++    model.eval()
++    psnr_sum = 0.0
++    count = 0
++    with torch.no_grad():
++        for noisy, clean in val_loader:
++            noisy, clean = noisy.to(device), clean.to(device)
++            output = model(noisy).clamp(0, 1)
++            # Compute per-image PSNR
++            for i in range(output.size(0)):
++                out_np = tensor_to_numpy(output[i])
++                cln_np = tensor_to_numpy(clean[i])
++                psnr_sum += compute_psnr(cln_np, out_np)
++                count += 1
++    return psnr_sum / max(count, 1)
++
++
++def train():
++    args = parse_args()
++    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
++    print(f"Device: {device}")
++
++    # ---------- Paths ----------
++    script_dir = os.path.dirname(os.path.abspath(__file__))
++    data_root = args.data_root or os.path.join(script_dir, "data")
++    ckpt_dir = os.path.join(script_dir, "checkpoints")
++    results_dir = os.path.join(script_dir, "results")
++    os.makedirs(ckpt_dir, exist_ok=True)
++    os.makedirs(results_dir, exist_ok=True)
++
++    # ---------- Dataset ----------
++    print("[1/5] Preparing DIV2K dataset ...")
++    train_dir, valid_dir = prepare_div2k(data_root)
++
++    train_ds = DIV2KDenoisingDataset(
++        train_dir, sigma=args.sigma, mode=args.mode,
++        train=True, patch_size=args.patch_size,
++    )
++    val_ds = DIV2KDenoisingDataset(
++        valid_dir, sigma=args.sigma, mode=args.mode,
++        train=False, patch_size=args.patch_size,  # no masking for validation
++    )
++
++    train_loader = DataLoader(
++        train_ds, batch_size=args.batch_size, shuffle=True,
++        num_workers=args.num_workers, pin_memory=True, drop_last=True,
++    )
++    val_loader = DataLoader(
++        val_ds, batch_size=1, shuffle=False,
++        num_workers=args.num_workers, pin_memory=True,
++    )
++
++    # ---------- Model ----------
++    in_ch = 1 if args.mode == "gray" else 3
++    model = UNet(in_channels=in_ch).to(device)
++    print(f"[2/5] U-Net ({args.mode}) created — {count_parameters(model):,} parameters")
++
++    # ---------- Optimizer & Scheduler ----------
++    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
++    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
++    scaler = GradScaler("cuda")  # Mixed precision
++
++    # ---------- Training loop ----------
++    print(f"[3/5] Training for {args.epochs} epochs "
++          f"(σ={args.sigma}, batch={args.batch_size}, "
++          f"increase_ratio={args.increase_ratio}) ...")
++    best_psnr = 0.0
++    train_losses = []
++    val_psnrs = []
++    model_name = f"n2n_unet_{args.mode}_sigma{int(args.sigma)}"
++
++    total_start = time.time()
++    for epoch in range(1, args.epochs + 1):
++        model.train()
++        epoch_loss = 0.0
++        t0 = time.time()
++
++        for noisy, clean in train_loader:
++            noisy = noisy.to(device)
++
++            optimizer.zero_grad()
++            with autocast("cuda"):
++                # Neighbor2Neighbor specific operations
++                noisy_sub1, noisy_sub2 = generate_subimages(noisy)
++
++                # Generate pseudo-clean expected difference (without gradients)
++                with torch.no_grad():
++                    noisy_denoised = model(noisy)
++                noisy_sub1_denoised, noisy_sub2_denoised = generate_subimages(noisy_denoised)
++                exp_diff = noisy_sub1_denoised - noisy_sub2_denoised
++
++                # Forward pass on sub1, predict for sub2
++                output_sub1 = model(noisy_sub1)
++
++                diff = output_sub1 - noisy_sub2
++                lambda_reg = (epoch / args.epochs) * args.increase_ratio
++
++                loss1 = torch.mean(diff**2)
++                loss2 = lambda_reg * torch.mean((diff - exp_diff)**2)
++                loss = loss1 + 2.0 * loss2
++
++            scaler.scale(loss).backward()
++            scaler.step(optimizer)
++            scaler.update()
++            epoch_loss += loss.item()
++
++        scheduler.step()
++        avg_loss = epoch_loss / len(train_loader)
++        train_losses.append(avg_loss)
++
++        # Validate every 5 epochs or last epoch
++        if epoch % 5 == 0 or epoch == args.epochs:
++            val_psnr = validate(model, val_loader, device)
++            val_psnrs.append(val_psnr)
++            dt = time.time() - t0
++
++            # Save best model
++            if val_psnr > best_psnr:
++                best_psnr = val_psnr
++                torch.save(model.state_dict(),
++                           os.path.join(ckpt_dir, f"{model_name}_best.pth"))
++
++            print(f"  Epoch {epoch:3d}/{args.epochs} | "
++                  f"Loss: {avg_loss:.6f} | Val PSNR: {val_psnr:.2f} dB | "
++                  f"Best: {best_psnr:.2f} dB | LR: {scheduler.get_last_lr()[0]:.6f} | "
++                  f"Time: {dt:.1f}s")
++        else:
++            val_psnrs.append(val_psnrs[-1] if val_psnrs else 0)
++            dt = time.time() - t0
++            print(f"  Epoch {epoch:3d}/{args.epochs} | "
++                  f"Loss: {avg_loss:.6f} | "
++                  f"LR: {scheduler.get_last_lr()[0]:.6f} | Time: {dt:.1f}s")
++
++    total_time = time.time() - total_start
++    print(f"\n[4/5] Training complete in {total_time / 60:.1f} min — Best PSNR: {best_psnr:.2f} dB")
++
++    # Save final model
++    torch.save(model.state_dict(), os.path.join(ckpt_dir, f"{model_name}_final.pth"))
++
++    # ---------- Plot curves ----------
++    print("[5/5] Saving training curves ...")
++    plot_training_curves(
++        train_losses, val_psnrs,
++        os.path.join(results_dir, f"{model_name}_training_curves.png"),
++    )
++    print(f"Done! Checkpoints in: {ckpt_dir}")
++
++
++if __name__ == "__main__":
++    train()
+diff --git a/exp10v2/utils.py b/exp10v2/utils.py
+new file mode 100644
+index 0000000..ecd0180
+--- /dev/null
++++ b/exp10v2/utils.py
+@@ -0,0 +1,158 @@
++"""
++Utility Functions for Noise2Void Denoising Experiment
++=====================================================
++- PSNR / SSIM computation
++- Gaussian noise injection
++- Blind-spot mask generation & neighbor replacement
++- Visual comparison figure generation
++- Training curve plotting
++"""
++
++import os
++import numpy as np
++import torch
++import matplotlib
++matplotlib.use("Agg")  # non-interactive backend
++import matplotlib.pyplot as plt
++from skimage.metrics import peak_signal_noise_ratio as _psnr
++from skimage.metrics import structural_similarity as _ssim
++
++
++# ============================================================
++# Metrics
++# ============================================================
++def compute_psnr(clean: np.ndarray, denoised: np.ndarray, data_range: float = 1.0) -> float:
++    """Compute Peak Signal-to-Noise Ratio (dB)."""
++    return float(_psnr(clean, denoised, data_range=data_range))
++
++
++def compute_ssim(clean: np.ndarray, denoised: np.ndarray, data_range: float = 1.0) -> float:
++    """Compute Structural Similarity Index."""
++    # Handle grayscale (H,W) and color (H,W,C)
++    if clean.ndim == 3 and clean.shape[2] == 3:
++        return float(_ssim(clean, denoised, data_range=data_range, channel_axis=2))
++    return float(_ssim(clean, denoised, data_range=data_range))
++
++
++# ============================================================
++# Noise helpers
++# ============================================================
++def add_gaussian_noise(image: np.ndarray, sigma: float, seed: int = None) -> np.ndarray:
++    """
++    Add Gaussian noise to an image.
++
++    Args:
++        image:  Clean image in [0, 1] range.
++        sigma:  Noise standard deviation in [0, 255] scale.
++        seed:   Optional random seed for reproducibility.
++    Returns:
++        Noisy image clipped to [0, 1].
++    """
++    if seed is not None:
++        rng = np.random.RandomState(seed)
++    else:
++        rng = np.random
++    noise = rng.randn(*image.shape).astype(np.float32) * (sigma / 255.0)
++    return np.clip(image + noise, 0, 1).astype(np.float32)
++
++
++# ============================================================
++# Neighbor2Neighbor Sub-sampling
++# ============================================================
++def generate_subimages(img: torch.Tensor) -> tuple:
++    """
++    Subsample an image into two neighboring sub-images (H/2, W/2).
++
++    Randomly chooses to pair either horizontal neighbors or vertical neighbors
++    to satisfy the Neighbor2Neighbor constraint.
++    """
++    if torch.rand(1).item() > 0.5:
++        # horizontal neighbors
++        sub1 = img[:, :, 0::2, 0::2]
++        sub2 = img[:, :, 0::2, 1::2]
++    else:
++        # vertical neighbors
++        sub1 = img[:, :, 0::2, 0::2]
++        sub2 = img[:, :, 1::2, 0::2]
++
++    return sub1, sub2
++
++
++# ============================================================
++# Tensor ↔ numpy helpers
++# ============================================================
++def tensor_to_numpy(t: torch.Tensor) -> np.ndarray:
++    """Convert (B,C,H,W) or (C,H,W) tensor → (H,W) or (H,W,C) numpy in [0,1]."""
++    if t.dim() == 4:
++        t = t.squeeze(0)
++    t = t.detach().cpu().clamp(0, 1)
++    arr = t.numpy()
++    if arr.shape[0] == 1:
++        return arr[0]          # (H, W)
++    return arr.transpose(1, 2, 0)  # (H, W, C)
++
++
++# ============================================================
++# Visualization
++# ============================================================
++def save_comparison_figure(
++    images: list,
++    titles: list,
++    save_path: str,
++    suptitle: str = "",
++    cmap: str = "gray",
++):
++    """
++    Save a side-by-side comparison figure.
++
++    Args:
++        images: List of numpy arrays (H,W) or (H,W,3).
++        titles: List of title strings for each subplot.
++        save_path: Path to save the figure.
++        suptitle: Optional super-title for the figure.
++        cmap: Colormap (used only for grayscale images).
++    """
++    n = len(images)
++    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5))
++    if n == 1:
++        axes = [axes]
++    for ax, img, title in zip(axes, images, titles):
++        if img.ndim == 2:
++            ax.imshow(img, cmap=cmap, vmin=0, vmax=1)
++        else:
++            ax.imshow(np.clip(img, 0, 1))
++        ax.set_title(title, fontsize=11, fontweight="bold")
++        ax.axis("off")
++    if suptitle:
++        fig.suptitle(suptitle, fontsize=14, fontweight="bold", y=1.02)
++    plt.tight_layout()
++    plt.savefig(save_path, dpi=150, bbox_inches="tight")
++    plt.close(fig)
++    print(f"  → Saved: {save_path}")
++
++
++def plot_training_curves(
++    train_losses: list,
++    val_psnrs: list,
++    save_path: str,
++):
++    """Plot and save training loss + validation PSNR curves."""
++    epochs = range(1, len(train_losses) + 1)
++    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
++
++    ax1.plot(epochs, train_losses, "b-", linewidth=1.5)
++    ax1.set_xlabel("Epoch")
++    ax1.set_ylabel("Training Loss (MSE)")
++    ax1.set_title("Training Loss Curve", fontweight="bold")
++    ax1.grid(True, alpha=0.3)
++
++    ax2.plot(epochs, val_psnrs, "r-", linewidth=1.5)
++    ax2.set_xlabel("Epoch")
++    ax2.set_ylabel("Validation PSNR (dB)")
++    ax2.set_title("Validation PSNR Curve", fontweight="bold")
++    ax2.grid(True, alpha=0.3)
++
++    plt.tight_layout()
++    plt.savefig(save_path, dpi=150, bbox_inches="tight")
++    plt.close(fig)
++    print(f"  → Saved: {save_path}")
+diff --git a/exp10v2/version.txt b/exp10v2/version.txt
+new file mode 100644
+index 0000000..5ba8c31
+--- /dev/null
++++ b/exp10v2/version.txt
+@@ -0,0 +1 @@
++Python 3.12.13

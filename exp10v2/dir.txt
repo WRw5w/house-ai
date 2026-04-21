@@ -1,0 +1,25 @@
+ \xc7\xfd\xb6\xaf\xc6\xf7 D \xd6еľ\xedû\xd3б\xeaǩ\xa1\xa3
+ \xbe\xed\xb5\xc4\xd0\xf2\xc1к\xc5\xca\xc7 56F8-033B
+
+ D:\02_Projects\ML\zhangchengxi_BM3D\exp9 \xb5\xc4Ŀ¼
+
+2026/04/12  15:46    <DIR>          .
+2026/04/11  21:39    <DIR>          ..
+2026/04/11  21:39               102 .gitignore
+2026/04/11  21:39    <DIR>          checkpoints
+2026/04/12  15:23               765 check_env.py
+2026/04/12  15:03    <DIR>          data
+2026/04/11  21:42             8,972 dataset.py
+2026/04/12  15:26               126 diag.bat
+2026/04/12  15:46                 0 dir.txt
+2026/04/12  15:43                 0 env_check.txt
+2026/04/11  21:44            10,026 evaluate.py
+2026/04/11  21:42             5,707 model.py
+2026/04/11  21:45               647 plot_combined.py
+2026/04/11  21:45            10,742 Report.tex
+2026/04/11  21:39    <DIR>          results
+2026/04/11  21:44             7,968 train.py
+2026/04/11  21:41             6,907 utils.py
+2026/04/12  15:03    <DIR>          __pycache__
+              12 \xb8\xf6\xceļ\xfe         51,962 \xd7ֽ\xda
+               6 \xb8\xf6Ŀ¼ 462,931,668,992 \xbf\xc9\xd3\xc3\xd7ֽ\xda
